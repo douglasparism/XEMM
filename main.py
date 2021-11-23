@@ -27,7 +27,7 @@ expected_volume = 0
 
 # Massive download of OrderBook data
 data = order_book(symbol=symbol, exchanges=exchanges, output='inplace', stop=None,
-                  verbose=True, execution='ray', exec_time=10)
+                  verbose=True, execution='ray', exec_time=60)
 
 # Test
 # data['kraken'][list(data['kraken'].keys())[2]]

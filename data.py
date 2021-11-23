@@ -254,6 +254,7 @@ def order_book(symbol, exchanges, execution='async', stop=None, exec_time=60,
     # ----------------------------------------------------------------------------- RAY REQUESTS -- #
     @ray.remote
     def client_ray(exchange, symbol):
+        list_of_dicts = []
         client = getattr(ccxt, exchange)({'enableRateLimit': True})
 
         time_1 = time.time()
@@ -278,7 +279,7 @@ def order_book(symbol, exchanges, execution='async', stop=None, exec_time=60,
                 spread = np.round(ask_price - bid_price, 4)
 
                 # Final data format for the results
-                r_data[client.id].update({datetime: pd.DataFrame({'ask_size': ask_size, 'ask': ask_price,
+                list_of_dicts.append({datetime: pd.DataFrame({'ask_size': ask_size, 'ask': ask_price,
                                                                   'bid': bid_price, 'bid_size': bid_size,
                                                                   'spread': spread})})
                 # End time
@@ -289,6 +290,7 @@ def order_book(symbol, exchanges, execution='async', stop=None, exec_time=60,
             except Exception as e:
                 print(type(e).__name__, e.args, str(e))
                 pass
+        return list_of_dicts
 
     # ------------------------------------------------------------------------------ MULTIPLE ORDERBOOKS -- # 
     async def multi_orderbooks(exchanges, symbol):
@@ -321,6 +323,10 @@ def order_book(symbol, exchanges, execution='async', stop=None, exec_time=60,
         x_id = client_ray.remote(exchanges[0], symbol)
         y_id = client_ray.remote(exchanges[1], symbol)
         x, y = ray.get([x_id, y_id])
+        for i in x:
+            r_data[exchanges[0]].update(i)
+        for i in y:
+            r_data[exchanges[1]].update(i)
 
     # Run multiple events in parallel
     elif execution=='parallel':
