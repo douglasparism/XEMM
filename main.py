@@ -26,7 +26,8 @@ expected_volume = 0
 # fees = fees_schedule(exchange='kraken', symbol=symbol, expected_volume=expected_volume)
 
 # Massive download of OrderBook data
-# data = order_book(symbol=symbol, exchanges=exchanges, output='inplace', stop=None, verbose=True)
+data = order_book(symbol=symbol, exchanges=exchanges, output='inplace', stop=None,
+                  verbose=True, execution='ray', exec_time=10)
 
 # Test
 # data['kraken'][list(data['kraken'].keys())[2]]

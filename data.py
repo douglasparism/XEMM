@@ -15,6 +15,7 @@ import pandas as pd
 import numpy as np
 import time
 import json
+import ray
 
 # -- Cryptocurrency data and trading API
 import ccxt
@@ -89,7 +90,8 @@ def fees_schedule(exchange, symbol, expected_volume):
 # --------------------------------------------------------------------------- ASYNCRONOUS ORDERBOOK DATA -- # 
 # --------------------------------------------------------------------------------------------------------- #
 
-def order_book(symbol, exchanges, execution='async', stop=None, output=None, verbose=True):
+def order_book(symbol, exchanges, execution='async', stop=None, exec_time=60,
+               output=None, verbose=True, jsonpath="files/orderbooks_06jun2021.json"):
     """
     Asyncronous OrderBook data fetcher. It will asyncronously catch innovations of transactions whenever they
     occur for every exchange is included in the list exchanges, and return the complete orederbook in a in a
@@ -177,7 +179,7 @@ def order_book(symbol, exchanges, execution='async', stop=None, output=None, ver
         time_f = 0
 
         # Loop until stop criteria is reached
-        while time_f <= 60:
+        while time_f <= exec_time:
             
             # Try and await for client response
             try:
@@ -211,6 +213,83 @@ def order_book(symbol, exchanges, execution='async', stop=None, output=None, ver
         # Close client
         await client.close()
 
+    # ----------------------------------------------------------------------------- THREAD REQUESTS -- #
+    def client_thread(exchange, symbol):
+        client = getattr(ccxt, exchange)({'enableRateLimit': True})
+
+        time_1 = time.time()
+        time_f = 0
+
+        while time_f <= exec_time:
+
+            # Try and await for client response
+            try:
+
+                # Fetch, await and get datetime
+                orderbook = client.fetch_order_book(symbol)
+                datetime = client.iso8601(client.milliseconds())
+
+                # Verbosity
+                if verbose:
+                    print(datetime, client.id, symbol, orderbook['bids'][0], orderbook['asks'][0])
+
+                # Unpack values
+                ask_price, ask_size = np.array(list(zip(*orderbook['asks']))[0:2])
+                bid_price, bid_size = np.array(list(zip(*orderbook['bids']))[0:2])
+                spread = np.round(ask_price - bid_price, 4)
+
+                # Final data format for the results
+                r_data[client.id].update({datetime: pd.DataFrame({'ask_size': ask_size, 'ask': ask_price,
+                                                                  'bid': bid_price, 'bid_size': bid_size,
+                                                                  'spread': spread})})
+                # End time
+                time_2 = time.time()
+                time_f = round(time_2 - time_1, 4)
+
+            # In case something bad happens with client
+            except Exception as e:
+                print(type(e).__name__, e.args, str(e))
+                pass
+
+    # ----------------------------------------------------------------------------- RAY REQUESTS -- #
+    @ray.remote
+    def client_ray(exchange, symbol):
+        client = getattr(ccxt, exchange)({'enableRateLimit': True})
+
+        time_1 = time.time()
+        time_f = 0
+
+        while time_f <= exec_time:
+
+            # Try and await for client response
+            try:
+
+                # Fetch, await and get datetime
+                orderbook = client.fetch_order_book(symbol)
+                datetime = client.iso8601(client.milliseconds())
+
+                # Verbosity
+                if verbose:
+                    print(datetime, client.id, symbol, orderbook['bids'][0], orderbook['asks'][0])
+
+                # Unpack values
+                ask_price, ask_size = np.array(list(zip(*orderbook['asks']))[0:2])
+                bid_price, bid_size = np.array(list(zip(*orderbook['bids']))[0:2])
+                spread = np.round(ask_price - bid_price, 4)
+
+                # Final data format for the results
+                r_data[client.id].update({datetime: pd.DataFrame({'ask_size': ask_size, 'ask': ask_price,
+                                                                  'bid': bid_price, 'bid_size': bid_size,
+                                                                  'spread': spread})})
+                # End time
+                time_2 = time.time()
+                time_f = round(time_2 - time_1, 4)
+
+            # In case something bad happens with client
+            except Exception as e:
+                print(type(e).__name__, e.args, str(e))
+                pass
+
     # ------------------------------------------------------------------------------ MULTIPLE ORDERBOOKS -- # 
     async def multi_orderbooks(exchanges, symbol):
         # A list of routines (and parameters) to run
@@ -221,6 +300,27 @@ def order_book(symbol, exchanges, execution='async', stop=None, output=None, ver
     # Run event loop in async
     if execution=='async':
         asyncio.get_event_loop().run_until_complete(multi_orderbooks(exchanges, symbol))
+
+    # Run multiple events in threads
+    elif execution == 'thread':
+        if len(exchanges) != 2:
+            raise ValueError('Only 2 exchanges supported in thread mode')
+        from threading import Thread
+        task_1 = Thread(target=client_thread, args=[exchanges[0], symbol])
+        task_2 = Thread(target=client_thread, args=[exchanges[1], symbol])
+        task_1.start()
+        task_2.start()
+        task_1.join()
+        task_2.join()
+
+    # Run multiple events in parallel
+    elif execution == 'ray':
+        if len(exchanges) != 2:
+            raise ValueError('Only 2 exchanges supported in ray mode')
+        ray.init()
+        x_id = client_ray.remote(exchanges[0], symbol)
+        y_id = client_ray.remote(exchanges[1], symbol)
+        x, y = ray.get([x_id, y_id])
 
     # Run multiple events in parallel
     elif execution=='parallel':
@@ -238,7 +338,7 @@ def order_book(symbol, exchanges, execution='async', stop=None, output=None, ver
         json_object = pd.DataFrame(r_data).to_json()
         
         # Writing to sample.json
-        with open("files/orderbooks_06jun2021.json", "w") as outfile:
+        with open(jsonpath, "w") as outfile:
             outfile.write(json_object)
 
     # Just return the DataFrame
