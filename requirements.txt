@@ -27,3 +27,5 @@ rich==10.3.0
 
 # -- Notebooks
 ipywidgets==7.6.3
+
+ray~=1.8.0
