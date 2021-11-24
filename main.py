@@ -12,28 +12,56 @@
 
 # -- Load Packages for this script
 import pandas as pd
-import pandas as np
+import functions as fn
 
 # -- Load other scripts
 from data import fees_schedule, order_book
 
 # Small test
 exchanges = ["bitfinex", "kraken"]
-symbol = 'BTC/EUR'
+symbol = 'BTC/USD'
 expected_volume = 0
 
 # Get fee schedule
 # fees = fees_schedule(exchange='kraken', symbol=symbol, expected_volume=expected_volume)
 
 # Massive download of OrderBook data
-data = order_book(symbol=symbol, exchanges=exchanges, output='inplace', stop=None,
-                  verbose=True, execution='ray', exec_time=60)
+#data = order_book(symbol=symbol, exchanges=exchanges, output='JSON', stop=None,
+#                  verbose=True, execution='ray', exec_time=120,jsonpath="files/orderbooks_ray.json")
 
 # Test
 # data['kraken'][list(data['kraken'].keys())[2]]
 
 # Read previously downloaded file
-ob_data = pd.read_json('files/orderbooks_06jun2021.json', orient='values', typ='series')
+ob_data = pd.read_json('files/orderbooks_ray.json', orient='values', typ='series')
+#Describe OB data
+
+E1_ts_data = [i for i in ob_data[exchanges[0]].keys() if ob_data[exchanges[0]][i] != None]
+E2_ts_data = [i for i in ob_data[exchanges[1]].keys() if ob_data[exchanges[1]][i] != None]
+
+q1_results = fn.f_timestamps_info(ts_list_o=E1_ts_data, ts_list_d=E2_ts_data)
+
+display('Timestamps in Origin data:')
+display('First Timestamp: ' + q1_results["first_o"])
+display('Last Timestamp: ' + q1_results["last_o"])
+display('Total number of orderbooks: ' + str(q1_results["qty_o"]))
+
+display('Timestamps in Destination data:')
+display('First Timestamp: ' + q1_results["first_d"])
+display('Last Timestamp: ' + q1_results["last_d"])
+display('Total number of orderbooks: ' + str(q1_results["qty_d"]))
+
+display('Exact match of Timestamps: ' + str(q1_results["exact_match"]["qty"]))
+if q1_results["exact_match"]["qty"] == 0:
+    display("no exact matches")
+else:
+    display('First 2 values are: ')
+    display(q1_results["exact_match"]["values"][0].strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+    display(q1_results["exact_match"]["values"][1].strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+    display('Last 2 values are: ')
+    display(q1_results["exact_match"]["values"][-1].strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+    display(q1_results["exact_match"]["values"][-2].strftime("%Y-%m-%dT%H:%M:%S.%fZ"))
+
 
 # -- Simulation of trades (Pending)
 
