@@ -13,6 +13,9 @@
 # -- Load Packages for this script
 import pandas as pd
 import functions as fn
+from data import fees_schedule, order_book
+from timeit import default_timer as timer
+import time
 
 # -- Load other scripts
 from data import fees_schedule, order_book

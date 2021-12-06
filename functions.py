@@ -1,6 +1,9 @@
 import pandas as pd
-import time
+import numpy as np
 import warnings
+from data import fees_schedule, order_book
+from timeit import default_timer as timer
+import time
 warnings.filterwarnings("ignore")
 
 def f_timestamps_info(ts_list_o, ts_list_d):
@@ -169,4 +172,305 @@ def flatten_O(ex_O, spread):
     ex_O_final = pd.concat([ex_O_ask, ex_O_bid]).sort_values('price')
     ex_O_final.reset_index(inplace=True, drop=True)
     return ex_O_final
+
+def test_XEMM():
+
+    ob_data = pd.read_json('files/orderbooks_ray.json', orient='values', typ='series')
+    exchanges = ["kraken", "bitfinex"]
+    symbol = 'BTC/EUR'
+    expected_volume = 0
+    fees = [fees_schedule(exchange=i, symbol=symbol, expected_volume=expected_volume) for i in exchanges]
+    clean_order_kraken = f_del_none_dict(ob_data['kraken'])
+
+    clean_order_bitfinex = f_del_none_dict(ob_data['bitfinex'])
+
+    df_datetime = pd.DataFrame(columns=['dict_key', 'timestamp', 'exchange'])
+    df_datetime['dict_key'] = clean_order_kraken.keys()
+    df_datetime['timestamp'] = clean_order_kraken.keys()
+    df_datetime['exchange'] = 'kraken'
+
+    df_datetime_aux = pd.DataFrame(columns=['dict_key', 'timestamp', 'exchange'])
+    df_datetime_aux['dict_key'] = clean_order_bitfinex.keys()
+    df_datetime_aux['timestamp'] = clean_order_bitfinex.keys()
+    df_datetime_aux['exchange'] = 'bitfinex'
+
+    df_datetime = df_datetime.append(df_datetime_aux)
+    df_datetime['timestamp'] = pd.to_datetime(df_datetime['timestamp'])
+    df_datetime = df_datetime.sort_values(by=['timestamp'])
+    df_datetime = df_datetime.reset_index(drop=True)
+
+
+
+    pd.set_option("display.max_rows", None, "display.max_columns", None)
+    current_kraken = ''
+    current_bitfinex = ''
+    test = [1, 1, 1, 1]  # for testing
+    lat = 0.01
+    k = 0
+    b = 0
+    order_pairs = pd.DataFrame(columns=['size', 'price', 'type', 'source', 'id'])
+    for i in range(len(test)):
+        if df_datetime['exchange'][i] == 'kraken' and k == 0:
+            k = 1
+            current_kraken = df_datetime['dict_key'][i]
+
+        if df_datetime['exchange'][i] == 'bitfinex':
+            b = 1
+            current_bitfinex = df_datetime['dict_key'][i]
+            current_bitfinex_time = df_datetime['timestamp'][i]
+
+        if k == 1 and b == 1:
+            print('Al momento')
+            print(current_bitfinex, 'bitfinex')
+            print(current_kraken, 'kraken')
+
+            k = 0
+            b = 0
+
+            bit_time = df_datetime[df_datetime['exchange'] == 'bitfinex']
+            future = bit_time[bit_time['timestamp'] > current_bitfinex_time].reset_index(drop=True)
+            future_bitfinex_time = future.loc[0]['timestamp']
+            tdelta = (future_bitfinex_time - current_bitfinex_time).total_seconds()
+
+            print('TIEMPO MAS CERCANO FUTURO BITFINEX', future_bitfinex_time)
+
+            # Sacar los OB
+            ex_O = dict_to_df('kraken', current_kraken, ob_data)
+            ex_D = dict_to_df('bitfinex', current_bitfinex, ob_data)
+
+            ex_D_final = flatten_D(ex_D)
+            ex_O_final = flatten_O(ex_O, spread=25)
+
+            # print('Destination inicial',ex_D_final)
+            # print('Origin inicial',ex_O_final)
+
+            display('Highest Bid Prices')
+            display('Destination: ' + exchanges[1] + ' ' + str(max(ex_D.bid)))
+            display('Origin: ' + exchanges[0] + ' ' + str(max(ex_O.bid)))
+
+            display('Lowest Ask Prices')
+            display('Destination: ' + exchanges[1] + ' ' + str(min(ex_D.ask)))
+            display('Origin: ' + exchanges[0] + ' ' + str(min(ex_O.ask)))
+
+            bid_example = ex_O_final[ex_O_final['Type'] == 'bid']
+            bid_example = bid_example[bid_example['price'] == bid_example['price'].max()]
+            init_bid = bid_example.index.values[0]
+
+            ask_example = ex_O_final[ex_O_final['Type'] == 'ask']
+            ask_example = ask_example[ask_example['price'] == ask_example['price'].min()]
+            init_ask = ask_example.index.values[0]
+
+            display(bid_example)
+            display(ask_example)
+
+            taker_fee = fees[0]['taker'] * 0.0001  # bps to decimal
+            maker_fee = fees[1]['maker'] * 0.0001  # bps to decimal
+            token = 100  # BTC
+            fiat = 1000000  # EUR
+            inventory = {'asset': 100, 'fiat': 1000000}
+            tokens = {'asset': 0, 'fiat': 0}
+            profit = 0.01  # 1 centavo de profit por trade
+            decimals = 10
+            print(tdelta)
+            time_i = timer()
+
+            order_historical = pd.DataFrame(columns=['size', 'price', 'type', 'source', 'status', 'time_delta'])
+
+            for t in range(len(ex_O_final)):
+
+                to_ex = order_historical[(order_historical['time_delta'] <= timer() - time_i) & (
+                            order_historical['time_delta'] > 0)].reset_index()
+
+                display(to_ex)
+
+                for j in range(len(to_ex)):
+                    if len(to_ex) >= 1:
+
+                        if to_ex.loc[j]['type'] == 'bid':
+                            id_orden = order_pairs[order_pairs['price'] == to_ex.loc[j]['price']]['id'].values[0]
+
+                            # print(order_pairs[order_pairs['id'] == id_orden])
+                            origin_price = order_pairs[order_pairs['id'] == id_orden]
+                            origin_price = origin_price[origin_price['source'] == 'orig']
+                            origin_price = origin_price[origin_price['type'] == 'bid']['price'].values[0]
+                            # print('El precio de origen es:', origin_price)
+                            # EJECUTAR BIDS
+                            inventory, tokens, ex_D_final_2, ex_O_final_2 = execute_bids(origin_price,
+                                                                                            to_ex.loc[j]['price'],
+                                                                                            taker_fee, maker_fee,
+                                                                                            to_ex.loc[j]['size'], inventory,
+                                                                                            tokens, ex_D_final_2,
+                                                                                            ex_O_final_2, lat)
+                            ex_D_final = ex_D_final_2
+                            ex_O_final = ex_O_final_2
+                            order_historical.loc[len(order_historical)] = [to_ex.loc[j]['size'], to_ex.loc[j]['price'],
+                                                                           'bid', 'destination', 'executed', 0]
+                            order_historical.loc[len(order_historical)] = [to_ex.loc[j]['size'], origin_price, 'bid',
+                                                                           'origin', 'executed', 0]
+
+                            destination_bid = order_pairs[order_pairs['id'] == id_orden]
+                            destination_bid = destination_bid[destination_bid['source'] == 'des']
+                            destination_bid = destination_bid[destination_bid['type'] == 'bid']['price'].values[0]
+
+                            index_ex = order_historical[(order_historical['price'] == destination_bid) & (
+                                        order_historical['status'] == 'posted')].index[0]
+                            order_historical.iloc[index_ex, 5] = 0
+
+                        else:
+
+                            id_orden = order_pairs[order_pairs['price'] == to_ex.loc[j]['price']]['id'].values[0]
+                            # print(order_pairs[order_pairs['id'] == id_orden])
+                            origin_price = order_pairs[order_pairs['id'] == id_orden]
+                            origin_price = origin_price[origin_price['source'] == 'orig']
+                            origin_price = origin_price[origin_price['type'] == 'ask']['price'].values[0]
+                            # print('El precio de origen es:', origin_price)
+                            # EJECUTAR ASK
+                            inventory, tokens, ex_D_final_2, ex_O_final_2 = execute_asks(origin_price,
+                                                                                            to_ex.loc[j]['price'],
+                                                                                            taker_fee,
+                                                                                            maker_fee, to_ex.loc[j]['size'],
+                                                                                            inventory, tokens, ex_D_final_2,
+                                                                                            ex_O_final_2, lat)
+
+                            ex_D_final = ex_D_final_2
+                            ex_O_final = ex_O_final_2
+
+                            order_historical.loc[len(order_historical)] = [to_ex.loc[j]['size'], to_ex.loc[j]['price'],
+                                                                           'ask', 'destination', 'executed', 0]
+                            order_historical.loc[len(order_historical)] = [to_ex.loc[j]['size'], origin_price, 'ask',
+                                                                           'origin', 'executed', 0]
+
+                            destination_ask = order_pairs[order_pairs['id'] == id_orden]
+                            destination_ask = destination_ask[destination_ask['source'] == 'des']
+                            destination_ask = destination_ask[destination_ask['type'] == 'ask']['price'].values[0]
+
+                            index_ex = order_historical[(order_historical['price'] == destination_ask) & (
+                                        order_historical['status'] == 'posted')].index[0]
+                            order_historical.iloc[index_ex, 5] = 0
+
+                if (time_i + tdelta) < timer():
+                    # print(time_i + tdelta)
+                    # print(timer())
+                    break
+
+                if init_bid >= 0:
+
+                    bid_example = ex_O_final[ex_O_final['Type'] == 'bid']
+                    bid_example = bid_example[bid_example['price'] == bid_example['price'][init_bid]]
+
+                    ask_example = ex_O_final[ex_O_final['Type'] == 'ask']
+                    ask_example = ask_example[ask_example['price'] == ask_example['price'][init_ask]]
+
+                    init_bid = init_bid - 1
+                    init_ask = init_ask + 1
+
+                    print('bid id', init_bid)
+
+                    ex_D_final, inventory, tokens = post_maker_bid(bid_example['price'], bid_example['size'], taker_fee,
+                                                                      maker_fee,
+                                                                      inventory, tokens, ex_D_final, decimals, profit, lat)
+
+                    ex_D_final, inventory, tokens = post_maker_ask(ask_example['price'], ask_example['size'], taker_fee,
+                                                                      maker_fee,
+                                                                      inventory, tokens, ex_D_final, decimals, profit, lat)
+
+                    print(inventory, tokens)
+
+                    ex_D_final_2 = ex_D_final.copy()
+                    ex_O_final_2 = ex_O_final.copy()
+
+                    destination_bid = calc_D_bid(float(bid_example['price']), taker_fee, maker_fee, decimals,
+                                                    profit)  # calculamos los precios posteados
+                    destination_ask = calc_D_ask(float(ask_example['price']), taker_fee, maker_fee, decimals,
+                                                    profit)  # calculamos los precios posteados
+
+                    idf = len(order_pairs)
+
+                    order_pairs.loc[len(order_pairs)] = [bid_example['size'].values[0], bid_example['price'].values[0],
+                                                         'bid', 'orig', idf]
+                    order_pairs.loc[len(order_pairs)] = [bid_example['size'].values[0], destination_bid, 'bid', 'des', idf]
+
+                    order_pairs.loc[len(order_pairs)] = [ask_example['size'].values[0], ask_example['price'].values[0],
+                                                         'ask', 'orig', idf]
+                    order_pairs.loc[len(order_pairs)] = [ask_example['size'].values[0], destination_ask, 'ask', 'des', idf]
+
+                    if not ex_D_final[(ex_D_final['price'] == destination_bid) & (ex_D_final['Type'] == 'bid')].empty:
+                        random_time_ex = np.random.uniform(min(timer() - time_i, tdelta), tdelta)
+
+                        order_historical.loc[len(order_historical)] = [bid_example['size'].values[0], destination_bid,
+                                                                       'bid', 'destination', 'posted', random_time_ex]
+
+                    if not ex_D_final[(ex_D_final['price'] == destination_ask) & (ex_D_final['Type'] == 'ask')].empty:
+                        random_time_ex = np.random.uniform(min(timer() - time_i, tdelta), tdelta)
+                        order_historical.loc[len(order_historical)] = [ask_example['size'].values[0], destination_ask,
+                                                                       'ask', 'destination', 'posted', random_time_ex]
+
+                    print('Destination BID', destination_bid)
+                    print('Destination ASK', destination_ask)
+
+                    # Se ejecutan??? CASO BID
+
+                    best_ask = ex_D_final_2[ex_D_final_2['Type'] == 'ask']
+                    best_ask = best_ask[best_ask['price'] == best_ask['price'].min()]
+                    # print('Best ASK colocation',best_ask['price'].values[0])
+
+                    if destination_bid > best_ask['price'].values[0]:
+                        print('Se ejecuta BID')
+                        # ejecutamos los bids
+                        inventory, tokens, ex_D_final_2, ex_O_final_2 = execute_bids(float(bid_example['price']),
+                                                                                        destination_bid, taker_fee,
+                                                                                        maker_fee,
+                                                                                        float(bid_example['size']),
+                                                                                        inventory, tokens, ex_D_final_2,
+                                                                                        ex_O_final_2, lat)
+                        ex_D_final = ex_D_final_2
+                        ex_O_final = ex_O_final_2
+                        order_historical.loc[len(order_historical)] = [bid_example['size'].values[0], destination_bid,
+                                                                       'bid', 'destination', 'executed', 0]
+                        order_historical.loc[len(order_historical)] = [bid_example['size'].values[0],
+                                                                       float(bid_example['price']), 'bid', 'origin',
+                                                                       'executed', 0]
+
+                        index_ex = order_historical[(order_historical['price'] == destination_bid) & (
+                                    order_historical['status'] == 'posted')].index[0]
+                        order_historical.iloc[index_ex, 5] = 0
+
+                    # Se ejecutan??? CASO BID
+                    best_bid = ex_D_final_2[ex_D_final_2['Type'] == 'bid']
+                    best_bid = best_bid[best_bid['price'] == best_bid['price'].max()]
+                    # print('Best BID colocation',best_bid['price'].values[0])
+
+                    if destination_ask < best_bid['price'].values[0]:
+                        print('Se ejecuta ASK')
+                        # ejecutamos los asks
+                        inventory, tokens, ex_D_final_2, ex_O_final_2 = execute_asks(float(ask_example['price']),
+                                                                                        destination_ask, taker_fee,
+                                                                                        maker_fee,
+                                                                                        float(ask_example['size']),
+                                                                                        inventory, tokens, ex_D_final_2,
+                                                                                        ex_O_final_2, lat)
+
+                        ex_D_final = ex_D_final_2
+                        ex_O_final = ex_O_final_2
+
+                        order_historical.loc[len(order_historical)] = [ask_example['size'].values[0], destination_ask,
+                                                                       'ask', 'destination', 'executed', 0]
+                        order_historical.loc[len(order_historical)] = [ask_example['size'].values[0],
+                                                                       float(ask_example['price']), 'ask', 'origin',
+                                                                       'executed', 0]
+
+                        index_ex = order_historical[(order_historical['price'] == destination_ask) & (
+                                    order_historical['status'] == 'posted')].index[0]
+                        order_historical.iloc[index_ex, 5] = 0
+
+                    # print(inventory['fiat']+tokens['fiat'])
+
+                    # print('Destination final',ex_D_final)
+                    # print('Origin final',ex_O_final)
+            display(order_historical)
+            print(inventory, tokens)
+            print('TIMEDELTA', tdelta)
+
+        else:
+            pass
 
