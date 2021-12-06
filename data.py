@@ -15,6 +15,7 @@ import pandas as pd
 import numpy as np
 import time
 import json
+
 #import ray
 
 # -- Cryptocurrency data and trading API
@@ -23,6 +24,10 @@ import ccxt
 # -- Asyncronous data fetch
 import asyncio
 import ccxt.async_support as ccxt_async
+
+import warnings
+warnings.filterwarnings("ignore")
+
 
 # --------------------------------------------------------------------------- EXCHANGE TRANSACTIONS FEEs -- # 
 # --------------------------------------------------------------------------------------------------------- #
