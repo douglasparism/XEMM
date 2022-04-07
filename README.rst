@@ -13,7 +13,7 @@ Installation
   
 Clone entire github project
 
-    git@github.com:IFFranciscoME/MarketMaker-BackTest.git
+    git@github.com:douglasparism/XEMM.git
 
 Install project's dependencies
 
@@ -27,6 +27,10 @@ J.Francisco Munnoz - `IFFranciscoME`_ -.
 
 .. _IFFranciscoME: https://iffranciscome.com/
 
+
+Douglas F. Paris - `douglasparism`_ -.
+
+.. _douglasparism: https://www.linkedin.com/in/douglasparism/
 
 --------------------
 Current Contributors
